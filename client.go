@@ -57,7 +57,7 @@ type Client struct {
 	sequence         uint64
 	handlers         map[string]Handler
 	send_mutex       sync.Mutex
-	callbacks        map[uint64]callback
+	callbacks        map[uint64]*callback
 	callbacks_mutex  sync.Mutex
 	body_max_bytes   uint32
 	method_max_bytes uint8
@@ -70,7 +70,7 @@ func NewClient(connection io.ReadWriteCloser, Version uint16, Sub_version uint16
 		sub_version:      Sub_version,
 		sequence:         0,
 		handlers:         make(map[string]Handler),
-		callbacks:        make(map[uint64]callback),
+		callbacks:        make(map[uint64]*callback),
 		body_max_bytes:   body_max_bytes,
 		method_max_bytes: method_max_bytes,
 	}
@@ -88,11 +88,12 @@ func (c *Client) Call_(method string, param []byte, timeout time.Duration) (*[]b
 
 	c.send_mutex.Lock()
 	c.sequence++
+	this_seq := c.sequence
 	c.send_mutex.Unlock()
 
-	c.callbacks_mutex.Lock()
-	c.callbacks[c.sequence] = callback{done: make(chan struct{}, 1), result: nil, msg_error_code: MSG_ERROR_CODE_TIMEOUT}
-	c.callbacks_mutex.Unlock()
+	//c.callbacks_mutex.Lock()
+	c.callbacks[this_seq] = &callback{done: make(chan struct{}, 1), result: nil, msg_error_code: MSG_ERROR_CODE_TIMEOUT}
+	//c.callbacks_mutex.Unlock()
 
 	//send msg
 	go func() {
@@ -107,7 +108,7 @@ func (c *Client) Call_(method string, param []byte, timeout time.Duration) (*[]b
 
 		//sequence
 		sequence := make([]byte, 8)
-		binary.LittleEndian.PutUint64(sequence, c.sequence)
+		binary.LittleEndian.PutUint64(sequence, this_seq)
 		_, err = c.conn.Write(sequence)
 		if err != nil {
 			return
@@ -142,7 +143,9 @@ func (c *Client) Call_(method string, param []byte, timeout time.Duration) (*[]b
 		}
 
 		//param_len
-		_, err = c.conn.Write([]byte{byte(uint32(len(param)))})
+		param_len := make([]byte, 4)
+		binary.LittleEndian.PutUint32(param_len, uint32(len(param)))
+		_, err = c.conn.Write(param_len)
 		if err != nil {
 			return
 		}
@@ -156,16 +159,16 @@ func (c *Client) Call_(method string, param []byte, timeout time.Duration) (*[]b
 	}()
 
 	select {
-	case <-c.callbacks[c.sequence].done:
+	case <-c.callbacks[this_seq].done:
 
 	case <-time.After(timeout):
 
 	}
 
-	var result callback
+	var result *callback
 	c.callbacks_mutex.Lock()
-	result = c.callbacks[c.sequence]
-	delete(c.callbacks, c.sequence)
+	result = c.callbacks[this_seq]
+	delete(c.callbacks, this_seq)
 	c.callbacks_mutex.Unlock()
 
 	return result.result, result.msg_error_code
@@ -226,8 +229,13 @@ func (c *Client) Run() {
 		} else {
 			//comes to the client
 			msg_e_code, err := c.read_msg_error_code()
-			if err != nil || msg_e_code > 0 {
+			if err != nil {
 				c.write_callback(sequence, MSG_ERROR_CODE_MSGERRCODE, nil)
+				break
+			}
+
+			if msg_e_code > 0 {
+				c.write_callback(sequence, msg_e_code, nil)
 				break
 			}
 
@@ -378,14 +386,14 @@ func (c *Client) respond(Sequence uint64, Error_code uint16, result *[]byte) err
 	defer c.send_mutex.Unlock()
 
 	//type
-	_, err := c.conn.Write([]byte(MSG_TYPE_REQUEST))
+	_, err := c.conn.Write([]byte(MSG_TYPE_RESPONSE))
 	if err != nil {
 		return err
 	}
 
 	//sequence
 	sequence := make([]byte, 8)
-	binary.LittleEndian.PutUint64(sequence, c.sequence)
+	binary.LittleEndian.PutUint64(sequence, Sequence)
 	_, err = c.conn.Write(sequence)
 	if err != nil {
 		return err

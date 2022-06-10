@@ -29,4 +29,10 @@ func main() {
 		return []byte{4, 5, 6, 7}
 	})
 
+	go client.Run()
+
+	call_result, call_err := client.Call("helloz", []byte{9, 9, 9, 9})
+	fmt.Println("call_err", call_err)
+	fmt.Println("call_result", call_result)
+
 }
