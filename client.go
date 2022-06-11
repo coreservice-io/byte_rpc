@@ -8,22 +8,17 @@ import (
 	"time"
 )
 
-//const BODY_MAX_BYTES = 1000 * 100 //100KB
-
 const MSG_TYPE_RESPONSE = "res"
 const MSG_TYPE_REQUEST = "req"
 
-const MSG_ERROR_CODE_NOERR = 0      //no error
-const MSG_ERROR_CODE_NETWORK = 1    //network err
+const MSG_ERROR_CODE_NO_ERR = 0     //no error
+const MSG_ERROR_CODE_CONN_CLOSE = 1 //conn close err
 const MSG_ERROR_CODE_TIMEOUT = 2    //timeout error
-const MSG_ERROR_CODE_PARSE = 3      //parse error
-const MSG_ERROR_CODE_TYPE = 4       //type error
-const MSG_ERROR_CODE_SEQ = 5        //sequence error
-const MSG_ERROR_CODE_VER = 6        //version not match
-const MSG_ERROR_CODE_METHOD = 7     //method error
-const MSG_ERROR_CODE_MSGERRCODE = 8 //msg error code error
-const MSG_ERROR_CODE_RESULT = 9     //msg result error
-const MSG_ERROR_CODE_PARAM = 10     //param result error
+const MSG_ERROR_CODE_VER = 3        //version not match
+const MSG_ERROR_CODE_METHOD = 4     //method error
+const MSG_ERROR_CODE_MSG_CODE = 5   //msg error code error
+const MSG_ERROR_CODE_RESULT = 6     //msg result error
+const MSG_ERROR_CODE_PARAM = 7      //param result error
 
 //call message little endian
 //type [3]byte
@@ -52,6 +47,7 @@ type callback struct {
 
 type Client struct {
 	conn             io.ReadWriteCloser
+	conn_closed      bool
 	version          uint16
 	sub_version      uint16
 	sequence         uint64
@@ -66,6 +62,7 @@ type Client struct {
 func NewClient(connection io.ReadWriteCloser, Version uint16, Sub_version uint16, body_max_bytes uint32, method_max_bytes uint8) *Client {
 	return &Client{
 		conn:             connection,
+		conn_closed:      false,
 		version:          Version,
 		sub_version:      Sub_version,
 		sequence:         0,
@@ -87,13 +84,13 @@ func (c *Client) Call(method string, param []byte) (*[]byte, uint16) {
 func (c *Client) Call_(method string, param []byte, timeout time.Duration) (*[]byte, uint16) {
 
 	c.send_mutex.Lock()
+	if c.conn_closed {
+		return nil, MSG_ERROR_CODE_CONN_CLOSE
+	}
 	c.sequence++
 	this_seq := c.sequence
+	c.callbacks[this_seq] = &callback{done: make(chan struct{}, 2), result: nil, msg_error_code: MSG_ERROR_CODE_TIMEOUT}
 	c.send_mutex.Unlock()
-
-	//c.callbacks_mutex.Lock()
-	c.callbacks[this_seq] = &callback{done: make(chan struct{}, 1), result: nil, msg_error_code: MSG_ERROR_CODE_TIMEOUT}
-	//c.callbacks_mutex.Unlock()
 
 	//send msg
 	go func() {
@@ -220,9 +217,9 @@ func (c *Client) Run() {
 
 			//handle request
 			result_byte := c.handlers[string(method)](param)
-			err = c.respond(sequence, MSG_ERROR_CODE_NOERR, &result_byte)
+			err = c.respond(sequence, MSG_ERROR_CODE_NO_ERR, &result_byte)
 
-			if err != nil || MSG_ERROR_CODE_NOERR > 0 {
+			if err != nil || MSG_ERROR_CODE_NO_ERR > 0 {
 				break
 			}
 
@@ -230,7 +227,7 @@ func (c *Client) Run() {
 			//comes to the client
 			msg_e_code, err := c.read_msg_error_code()
 			if err != nil {
-				c.write_callback(sequence, MSG_ERROR_CODE_MSGERRCODE, nil)
+				c.write_callback(sequence, MSG_ERROR_CODE_MSG_CODE, nil)
 				break
 			}
 
@@ -246,7 +243,7 @@ func (c *Client) Run() {
 				break
 			}
 
-			err = c.write_callback(sequence, MSG_ERROR_CODE_NOERR, &result)
+			err = c.write_callback(sequence, MSG_ERROR_CODE_NO_ERR, &result)
 			if err != nil {
 				break
 			}
@@ -255,7 +252,18 @@ func (c *Client) Run() {
 	}
 
 	//error happened
+	c.send_mutex.Lock()
+	c.callbacks_mutex.Lock()
+	for index, _ := range c.callbacks {
+		if c.callbacks[index].msg_error_code == MSG_ERROR_CODE_NO_ERR {
+			c.callbacks[index].msg_error_code = MSG_ERROR_CODE_CONN_CLOSE
+		}
+		c.callbacks[index].done <- struct{}{}
+	}
 	c.conn.Close()
+	c.conn_closed = true
+	c.callbacks_mutex.Unlock()
+	c.send_mutex.Unlock()
 }
 
 func (c *Client) read_sequence() (uint64, error) {

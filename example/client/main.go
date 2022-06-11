@@ -31,8 +31,12 @@ func main() {
 
 	go client.Run()
 
-	call_result, call_err := client.Call("helloz", []byte{9, 9, 9, 9})
+	call_result, call_err := client.Call("helloz", []byte{9, 9, 9, 9, 9})
 	fmt.Println("call_err", call_err)
 	fmt.Println("call_result", call_result)
+
+	hellow_result, hellow_result_err := client.Call("hellow", []byte{1, 1, 1, 1, 1})
+	fmt.Println("call_err", hellow_result_err)
+	fmt.Println("call_result", hellow_result)
 
 }

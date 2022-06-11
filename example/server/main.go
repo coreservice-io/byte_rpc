@@ -14,7 +14,8 @@ func bindClient(connection io.ReadWriteCloser) *byte_rpc.Client {
 
 	client.Register("helloz", func(b []byte) []byte {
 		fmt.Println("helloz_param:", b)
-		return []byte{8, 9, 10, 11}
+		//return []byte{8, 9, 10, 11}
+		return []byte{}
 	})
 
 	client.Register("hellow", func(b []byte) []byte {
