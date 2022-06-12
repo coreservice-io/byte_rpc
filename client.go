@@ -85,8 +85,10 @@ func (c *Client) Call_(method string, param []byte, timeout time.Duration) (*[]b
 
 	c.send_mutex.Lock()
 	if c.conn_closed {
+		c.send_mutex.Unlock()
 		return nil, MSG_ERROR_CODE_CONN_CLOSE
 	}
+
 	c.sequence++
 	this_seq := c.sequence
 	c.callbacks[this_seq] = &callback{done: make(chan struct{}, 2), result: nil, msg_error_code: MSG_ERROR_CODE_TIMEOUT}
@@ -252,16 +254,23 @@ func (c *Client) Run() {
 	}
 
 	//error happened
+	c.Close()
+
+}
+
+func (c *Client) Close() {
 	c.send_mutex.Lock()
 	c.callbacks_mutex.Lock()
-	for index, _ := range c.callbacks {
-		if c.callbacks[index].msg_error_code == MSG_ERROR_CODE_NO_ERR {
-			c.callbacks[index].msg_error_code = MSG_ERROR_CODE_CONN_CLOSE
+	if !c.conn_closed {
+		for index, _ := range c.callbacks {
+			if c.callbacks[index].msg_error_code == MSG_ERROR_CODE_NO_ERR {
+				c.callbacks[index].msg_error_code = MSG_ERROR_CODE_CONN_CLOSE
+			}
+			c.callbacks[index].done <- struct{}{}
 		}
-		c.callbacks[index].done <- struct{}{}
+		c.conn.Close()
+		c.conn_closed = true
 	}
-	c.conn.Close()
-	c.conn_closed = true
 	c.callbacks_mutex.Unlock()
 	c.send_mutex.Unlock()
 }
