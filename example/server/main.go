@@ -12,24 +12,14 @@ import (
 func bindClient(connection io.ReadWriteCloser) *byte_rpc.Client {
 	client := byte_rpc.NewClient(connection, example.VERSION, example.SUB_VERSION, example.BODY_MAX_BYTES, example.METHOD_MAX_BYTES)
 
-	client.Register("helloz", func(b []byte) []byte {
-		fmt.Println("helloz_param:", b)
+	client.Register("hello", func(input []byte) []byte {
+		fmt.Println("hello param:", string(input))
 
-		call_from_server, err_code := client.Call("hello", []byte{1, 2, 3})
-		fmt.Println("call_from_server", call_from_server)
-		fmt.Println("call_from_server err_code ", err_code)
+		name_from_client, err_code := client.Call("name", nil)
+		fmt.Println("name_from_client", string(*name_from_client))
+		fmt.Println("name_from_client err_code ", err_code)
 
-		call_from_serverx, err_codex := client.Call("hellox", []byte{1, 2, 3})
-		fmt.Println("call_from_serverx", call_from_serverx)
-		fmt.Println("call_from_serverx err_code ", err_codex)
-
-		return b
-	})
-
-	client.Register("hellow", func(b []byte) []byte {
-		fmt.Println("hellow_param:", b)
-		//return []byte{12, 13, 14, 15}
-		return b
+		return []byte("hello :" + string(*name_from_client))
 	})
 
 	return client

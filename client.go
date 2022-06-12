@@ -150,9 +150,11 @@ func (c *Client) Call_(method string, param []byte, timeout time.Duration) (*[]b
 		}
 
 		//param
-		_, err = c.conn.Write([]byte(param))
-		if err != nil {
-			return
+		if len(param) > 0 {
+			_, err = c.conn.Write([]byte(param))
+			if err != nil {
+				return
+			}
 		}
 
 	}()
