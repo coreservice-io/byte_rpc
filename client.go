@@ -8,6 +8,23 @@ import (
 	"time"
 )
 
+// ### request message    [`method` and `param` defined by user]
+// type [3]byte
+// sequence	uint64			   //little endian
+// version uint16              //little endian
+// sub_version uint16          //little endian
+// method_len uint8
+// method [method_len]byte
+// param_len uint32            //little endian
+// param [param_len]byte
+
+// ### response message  [`result` defined by user]
+// type [3]byte
+// sequence	uint64             //little endian
+// msg_error_code uint16       //little endian
+// result_len uint32           //little endian
+// result [result_len]byte
+
 const MSG_TYPE_RESPONSE = "res"
 const MSG_TYPE_REQUEST = "req"
 
@@ -19,23 +36,6 @@ const MSG_ERROR_CODE_METHOD = 4     //method error
 const MSG_ERROR_CODE_MSG_CODE = 5   //msg error code error
 const MSG_ERROR_CODE_RESULT = 6     //msg result error
 const MSG_ERROR_CODE_PARAM = 7      //param result error
-
-//call message little endian
-//type [3]byte
-//sequence	uint64
-//version uint16
-//sub_version uint16
-//method_len uint8
-//method [method_len]byte
-//param_len uint32
-//param [param_len]byte
-
-//response message little endian
-//type [3]byte
-//sequence	uint64
-//msg_error_code uint16
-//result_len uint32
-//result [result_len]byte
 
 type Handler func([]byte) []byte
 
@@ -51,9 +51,9 @@ type Client struct {
 	version          uint16
 	sub_version      uint16
 	sequence         uint64
-	handlers         map[string]Handler
+	handlers         sync.Map //map[string]Handler
 	send_mutex       sync.Mutex
-	callbacks        map[uint64]*callback
+	callbacks        sync.Map //map[uint64]*callback
 	callbacks_mutex  sync.Mutex
 	body_max_bytes   uint32
 	method_max_bytes uint8
@@ -66,15 +66,15 @@ func NewClient(connection io.ReadWriteCloser, Version uint16, Sub_version uint16
 		version:          Version,
 		sub_version:      Sub_version,
 		sequence:         0,
-		handlers:         make(map[string]Handler),
-		callbacks:        make(map[uint64]*callback),
+		handlers:         sync.Map{}, //make(map[string]Handler),
+		callbacks:        sync.Map{}, //make(map[uint64]*callback),
 		body_max_bytes:   body_max_bytes,
 		method_max_bytes: method_max_bytes,
 	}
 }
 
 func (c *Client) Register(method string, handler Handler) {
-	c.handlers[method] = handler
+	c.handlers.Store(method, handler)
 }
 
 func (c *Client) Call(method string, param []byte) (*[]byte, uint16) {
@@ -91,7 +91,7 @@ func (c *Client) Call_(method string, param []byte, timeout time.Duration) (*[]b
 
 	c.sequence++
 	this_seq := c.sequence
-	c.callbacks[this_seq] = &callback{done: make(chan struct{}, 2), result: nil, msg_error_code: MSG_ERROR_CODE_TIMEOUT}
+	c.callbacks.Store(this_seq, &callback{done: make(chan struct{}, 2), result: nil, msg_error_code: MSG_ERROR_CODE_TIMEOUT})
 	c.send_mutex.Unlock()
 
 	//send msg
@@ -157,17 +157,16 @@ func (c *Client) Call_(method string, param []byte, timeout time.Duration) (*[]b
 
 	}()
 
+	seq_callback, _ := c.callbacks.Load(this_seq)
 	select {
-	case <-c.callbacks[this_seq].done:
-
+	case <-seq_callback.(*callback).done:
 	case <-time.After(timeout):
-
 	}
 
 	var result *callback
 	c.callbacks_mutex.Lock()
-	result = c.callbacks[this_seq]
-	delete(c.callbacks, this_seq)
+	result_interface, _ := c.callbacks.LoadAndDelete(this_seq)
+	result = result_interface.(*callback)
 	c.callbacks_mutex.Unlock()
 
 	return result.result, result.msg_error_code
@@ -205,7 +204,9 @@ func (c *Client) Run() {
 				c.respond(sequence, MSG_ERROR_CODE_METHOD, nil)
 				break
 			}
-			if _, exist := c.handlers[string(method)]; !exist {
+
+			handler_interface, ok := c.handlers.Load(string(method))
+			if !ok {
 				c.respond(sequence, MSG_ERROR_CODE_METHOD, nil)
 				break
 			}
@@ -217,13 +218,15 @@ func (c *Client) Run() {
 				break
 			}
 
-			//handle request
-			result_byte := c.handlers[string(method)](param)
-			err = c.respond(sequence, MSG_ERROR_CODE_NO_ERR, &result_byte)
-
-			if err != nil || MSG_ERROR_CODE_NO_ERR > 0 {
-				break
-			}
+			//process the process using go-routing and read directly the next income
+			go func() {
+				//handle request
+				result_byte := handler_interface.(Handler)(param)
+				err = c.respond(sequence, MSG_ERROR_CODE_NO_ERR, &result_byte)
+				if err != nil || MSG_ERROR_CODE_NO_ERR > 0 {
+					c.Close()
+				}
+			}()
 
 		} else {
 			//comes to the client
@@ -262,12 +265,16 @@ func (c *Client) Close() {
 	c.send_mutex.Lock()
 	c.callbacks_mutex.Lock()
 	if !c.conn_closed {
-		for index, _ := range c.callbacks {
-			if c.callbacks[index].msg_error_code == MSG_ERROR_CODE_NO_ERR {
-				c.callbacks[index].msg_error_code = MSG_ERROR_CODE_CONN_CLOSE
+
+		c.callbacks.Range(func(k, v interface{}) bool {
+			if v.(*callback).msg_error_code == MSG_ERROR_CODE_NO_ERR {
+				v.(*callback).msg_error_code = MSG_ERROR_CODE_CONN_CLOSE
+				c.callbacks.Store(k.(uint64), v.(*callback))
 			}
-			c.callbacks[index].done <- struct{}{}
-		}
+			v.(*callback).done <- struct{}{}
+			return true
+		})
+
 		c.conn.Close()
 		c.conn_closed = true
 	}
@@ -463,17 +470,17 @@ func (c *Client) respond(Sequence uint64, Error_code uint16, result *[]byte) err
 	}
 
 	return nil
-
 }
 
 func (c *Client) write_callback(sequence uint64, msg_e_code uint16, result *[]byte) error {
 	c.callbacks_mutex.Lock()
 	defer c.callbacks_mutex.Unlock()
 
-	if callback, exist := c.callbacks[sequence]; exist {
-		callback.msg_error_code = msg_e_code
-		callback.result = result
-		callback.done <- struct{}{}
+	callback_interface, ok := c.callbacks.Load(sequence)
+	if ok {
+		callback_interface.(*callback).msg_error_code = msg_e_code
+		callback_interface.(*callback).result = result
+		callback_interface.(*callback).done <- struct{}{}
 		return nil
 	} else {
 		return errors.New("callback not exist")
