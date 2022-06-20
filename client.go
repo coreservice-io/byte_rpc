@@ -3,6 +3,7 @@ package byte_rpc
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 	"time"
@@ -37,6 +38,8 @@ const MSG_ERROR_CODE_MSG_CODE = 5   //msg error code error
 const MSG_ERROR_CODE_RESULT = 6     //msg result error
 const MSG_ERROR_CODE_PARAM = 7      //param result error
 
+const LIVE_FAIL_THRESHOLD = 4 // LIVE_FAIL_THRESHOLD * (ping/pong interval) no response
+
 type Handler func([]byte) []byte
 
 type callback struct {
@@ -59,8 +62,10 @@ type Client struct {
 	method_max_bytes uint8
 }
 
-func NewClient(connection io.ReadWriteCloser, Version uint16, Sub_version uint16, body_max_bytes uint32, method_max_bytes uint8) *Client {
-	return &Client{
+//live_check_duration is used for a background ping/pong routine
+func NewClient(connection io.ReadWriteCloser, Version uint16, Sub_version uint16,
+	body_max_bytes uint32, method_max_bytes uint8) *Client {
+	client := &Client{
 		conn:             connection,
 		conn_closed:      false,
 		version:          Version,
@@ -71,6 +76,46 @@ func NewClient(connection io.ReadWriteCloser, Version uint16, Sub_version uint16
 		body_max_bytes:   body_max_bytes,
 		method_max_bytes: method_max_bytes,
 	}
+
+	//config the ping/pong routing
+	client.Register("ping", func(b []byte) []byte {
+		fmt.Println("ping received:" + string(b))
+		return []byte("pong")
+	})
+
+	return client
+}
+
+func (c *Client) StartLivenessCheck(live_check_duration time.Duration, conn_closed_callback func(error)) {
+
+	last_ping_success := time.Now().Unix()
+
+	go func() {
+		for {
+			time.Sleep(live_check_duration)
+			if time.Now().Unix()-last_ping_success > LIVE_FAIL_THRESHOLD*int64(live_check_duration.Seconds()) {
+				c.Close()
+				conn_closed_callback(errors.New("ping time out"))
+				break
+			}
+		}
+	}()
+
+	//start the ping routing
+	go func() {
+		for {
+			_, call_err := c.Call("ping", nil)
+			if call_err != 0 {
+				c.Close()
+				conn_closed_callback(errors.New("ping failure"))
+				break
+			}
+			last_ping_success = time.Now().Unix()
+			fmt.Println("ping/pong success")
+			time.Sleep(live_check_duration)
+		}
+	}()
+
 }
 
 func (c *Client) Register(method string, handler Handler) {
@@ -175,6 +220,8 @@ func (c *Client) Call_(method string, param []byte, timeout time.Duration) (*[]b
 }
 
 func (c *Client) Run() {
+
+	//////main//////
 	for {
 		//type
 		type_bytes := make([]byte, 3)
