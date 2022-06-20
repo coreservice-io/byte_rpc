@@ -12,17 +12,16 @@ import (
 
 func main() {
 
+	startClientServe()
+
 	////connection
-	conn, err := net.Dial("tcp", "localhost:50000")
+	conn, err := net.Dial("tcp", ":50000")
 	if err != nil {
 		fmt.Println("Error dialing", err.Error())
 		return
 	}
 
-	go startClientServe()
-
-	client := byte_rpc.NewClient(conn, example.VERSION, example.SUB_VERSION, example.BODY_MAX_BYTES, example.METHOD_MAX_BYTES)
-	go client.Run()
+	client := byte_rpc.NewClient(conn, example.VERSION, example.SUB_VERSION, example.BODY_MAX_BYTES, example.METHOD_MAX_BYTES).Run()
 
 	call_result, call_err := client.Call("build_conn", []byte("version x sub version xxx tcp port 8099"))
 	fmt.Println("call_err", call_err)
@@ -33,10 +32,10 @@ func main() {
 }
 
 func bindClient(connection io.ReadWriteCloser) *byte_rpc.Client {
-	client := byte_rpc.NewClient(connection, example.VERSION, example.SUB_VERSION, example.BODY_MAX_BYTES, example.METHOD_MAX_BYTES)
-	client.StartLivenessCheck(time.Second*30, func(err error) {
-		fmt.Println("error", err)
-	})
+	client := byte_rpc.NewClient(connection, example.VERSION, example.SUB_VERSION, example.BODY_MAX_BYTES, example.METHOD_MAX_BYTES).
+		StartLivenessCheck(5*time.Second, func(err error) {
+			fmt.Println("liveness check error:", err)
+		})
 
 	client.Register("hello", func(input []byte) []byte {
 		fmt.Println("call to client hello param:", string(input))
@@ -51,20 +50,22 @@ func startClientServe() {
 	///////////////////////
 	fmt.Println("Starting client serve ...")
 
-	listener, err := net.Listen("tcp", "localhost:50001")
+	listener, err := net.Listen("tcp", ":50001")
 	if err != nil {
 		fmt.Println("Error listening", err.Error())
 		return
 	}
 
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			fmt.Println("Error accepting", err.Error())
-			continue
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				fmt.Println("Error accepting", err.Error())
+				continue
+			}
+			/////
+			bindClient(conn).Run()
 		}
-		/////
-		go bindClient(conn).Run()
-	}
+	}()
 
 }
