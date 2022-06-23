@@ -35,7 +35,22 @@ const MSG_ERROR_CODE_VER = 3        //version not match
 const MSG_ERROR_CODE_METHOD = 4     //method error
 const MSG_ERROR_CODE_MSG_CODE = 5   //msg error code error
 const MSG_ERROR_CODE_RESULT = 6     //msg result error
-const MSG_ERROR_CODE_PARAM = 7      //param result error
+const MSG_ERROR_CODE_PARAM = 7      //param  error
+
+func GetErrMsgStr(err_code uint) string {
+
+	var err_msg_map = map[uint]string{
+		1: "conn closed error",
+		2: "timeout error",
+		3: "version not match error",
+		4: "method error",
+		5: "error code error",
+		6: "result error",
+		7: "param error",
+	}
+
+	return err_msg_map[err_code]
+}
 
 const LIVE_FAIL_THRESHOLD = 4 // LIVE_FAIL_THRESHOLD * (ping/pong interval) no response
 
