@@ -77,19 +77,25 @@ type Client struct {
 	last_live_unixtime int64 //last live check time
 }
 
+type Config struct {
+	Version          uint16
+	Sub_version      uint16
+	Body_max_bytes   uint32
+	Method_max_bytes uint8
+}
+
 //live_check_duration is used for a background ping/pong routine
-func NewClient(connection io.ReadWriteCloser, Version uint16, Sub_version uint16,
-	body_max_bytes uint32, method_max_bytes uint8) *Client {
+func NewClient(connection io.ReadWriteCloser, config *Config) *Client {
 	client := &Client{
 		conn:               connection,
 		conn_closed:        false,
-		version:            Version,
-		sub_version:        Sub_version,
+		version:            config.Version,
+		sub_version:        config.Sub_version,
 		sequence:           0,
 		handlers:           sync.Map{}, //make(map[string]Handler),
 		callbacks:          sync.Map{}, //make(map[uint64]*callback),
-		body_max_bytes:     body_max_bytes,
-		method_max_bytes:   method_max_bytes,
+		body_max_bytes:     config.Body_max_bytes,
+		method_max_bytes:   config.Method_max_bytes,
 		last_live_unixtime: 0,
 	}
 

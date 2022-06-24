@@ -21,7 +21,12 @@ func main() {
 		return
 	}
 
-	client := byte_rpc.NewClient(conn, example.VERSION, example.SUB_VERSION, example.BODY_MAX_BYTES, example.METHOD_MAX_BYTES).Run()
+	client := byte_rpc.NewClient(conn, &byte_rpc.Config{
+		Version:          example.VERSION,
+		Sub_version:      example.SUB_VERSION,
+		Body_max_bytes:   example.BODY_MAX_BYTES,
+		Method_max_bytes: example.METHOD_MAX_BYTES,
+	}).Run()
 
 	call_result, call_err := client.Call("build_conn", []byte("version x sub version xxx tcp port 8099"))
 	fmt.Println("call_err", call_err)
@@ -32,7 +37,13 @@ func main() {
 }
 
 func bindClient(connection io.ReadWriteCloser) *byte_rpc.Client {
-	client := byte_rpc.NewClient(connection, example.VERSION, example.SUB_VERSION, example.BODY_MAX_BYTES, example.METHOD_MAX_BYTES).
+	client := byte_rpc.NewClient(connection,
+		&byte_rpc.Config{
+			Version:          example.VERSION,
+			Sub_version:      example.SUB_VERSION,
+			Body_max_bytes:   example.BODY_MAX_BYTES,
+			Method_max_bytes: example.METHOD_MAX_BYTES,
+		}).
 		StartLivenessCheck(5*time.Second, func(err error) {
 			fmt.Println("liveness check error:", err)
 		})
