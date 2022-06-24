@@ -63,40 +63,46 @@ type callback struct {
 }
 
 type Client struct {
-	conn               io.ReadWriteCloser
-	conn_closed        bool
-	version            uint16
-	sub_version        uint16
-	sequence           uint64
-	handlers           sync.Map //map[string]Handler
-	send_mutex         sync.Mutex
-	callbacks          sync.Map //map[uint64]*callback
-	callbacks_mutex    sync.Mutex
-	body_max_bytes     uint32
-	method_max_bytes   uint8
-	last_live_unixtime int64 //last live check time
+	conn                 io.ReadWriteCloser
+	conn_closed          bool
+	version              uint16
+	sub_version          uint16
+	sequence             uint64
+	handlers             sync.Map //map[string]Handler
+	send_mutex           sync.Mutex
+	callbacks            sync.Map //map[uint64]*callback
+	callbacks_mutex      sync.Mutex
+	body_max_bytes       uint32
+	method_max_bytes     uint8
+	last_live_unixtime   int64 //last live check time
+	conn_closed_callback func(error)
+	live_check_duration  time.Duration
 }
 
 type Config struct {
-	Version          uint16
-	Sub_version      uint16
-	Body_max_bytes   uint32
-	Method_max_bytes uint8
+	Version              uint16
+	Sub_version          uint16
+	Body_max_bytes       uint32
+	Method_max_bytes     uint8
+	Live_check_duration  time.Duration
+	Conn_closed_callback func(error)
 }
 
 //live_check_duration is used for a background ping/pong routine
 func NewClient(connection io.ReadWriteCloser, config *Config) *Client {
 	client := &Client{
-		conn:               connection,
-		conn_closed:        false,
-		version:            config.Version,
-		sub_version:        config.Sub_version,
-		sequence:           0,
-		handlers:           sync.Map{}, //make(map[string]Handler),
-		callbacks:          sync.Map{}, //make(map[uint64]*callback),
-		body_max_bytes:     config.Body_max_bytes,
-		method_max_bytes:   config.Method_max_bytes,
-		last_live_unixtime: 0,
+		conn:                 connection,
+		conn_closed:          false,
+		version:              config.Version,
+		sub_version:          config.Sub_version,
+		sequence:             0,
+		handlers:             sync.Map{}, //make(map[string]Handler),
+		callbacks:            sync.Map{}, //make(map[uint64]*callback),
+		body_max_bytes:       config.Body_max_bytes,
+		method_max_bytes:     config.Method_max_bytes,
+		last_live_unixtime:   0,
+		conn_closed_callback: config.Conn_closed_callback,
+		live_check_duration:  config.Live_check_duration,
 	}
 
 	//config the ping/pong routing
@@ -107,16 +113,16 @@ func NewClient(connection io.ReadWriteCloser, config *Config) *Client {
 	return client
 }
 
-func (c *Client) StartLivenessCheck(live_check_duration time.Duration, conn_closed_callback func(error)) *Client {
+func (c *Client) StartLivenessCheck() *Client {
 
 	c.last_live_unixtime = time.Now().Unix()
 
 	go func() {
 		for {
-			time.Sleep(live_check_duration)
-			if time.Now().Unix()-c.last_live_unixtime > LIVE_FAIL_THRESHOLD*int64(live_check_duration.Seconds()) {
+			time.Sleep(c.live_check_duration)
+			if time.Now().Unix()-c.last_live_unixtime > LIVE_FAIL_THRESHOLD*int64(c.live_check_duration.Seconds()) {
 				c.Close()
-				conn_closed_callback(errors.New("ping time out"))
+				c.conn_closed_callback(errors.New("ping time out"))
 				break
 			}
 		}
@@ -126,16 +132,16 @@ func (c *Client) StartLivenessCheck(live_check_duration time.Duration, conn_clos
 	go func() {
 		for {
 			//some msg from the other end arrived during last sleep
-			if c.last_live_unixtime < time.Now().Unix()-int64(live_check_duration.Seconds()) {
+			if c.last_live_unixtime < time.Now().Unix()-int64(c.live_check_duration.Seconds()) {
 				_, call_err := c.Call("ping", nil)
 				if call_err != 0 {
 					c.Close()
-					conn_closed_callback(errors.New("ping failure"))
+					c.conn_closed_callback(errors.New("ping failure"))
 					break
 				}
 				c.last_live_unixtime = time.Now().Unix()
 			}
-			time.Sleep(live_check_duration + 1)
+			time.Sleep(c.live_check_duration + 1)
 		}
 	}()
 
@@ -362,6 +368,7 @@ func (c *Client) Close() {
 	}
 	c.callbacks_mutex.Unlock()
 	c.send_mutex.Unlock()
+	c.conn_closed_callback(nil)
 }
 
 func (c *Client) read_sequence() (uint64, error) {

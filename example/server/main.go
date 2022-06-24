@@ -41,13 +41,15 @@ func buildConn() {
 	}
 
 	client := byte_rpc.NewClient(conn, &byte_rpc.Config{
-		Version:          example.VERSION,
-		Sub_version:      example.SUB_VERSION,
-		Body_max_bytes:   example.BODY_MAX_BYTES,
-		Method_max_bytes: example.METHOD_MAX_BYTES}).
-		Run().StartLivenessCheck(time.Duration(5*time.Second), func(err error) {
-		fmt.Println("liveness check  error:", err)
-	})
+		Version:             example.VERSION,
+		Sub_version:         example.SUB_VERSION,
+		Body_max_bytes:      example.BODY_MAX_BYTES,
+		Method_max_bytes:    example.METHOD_MAX_BYTES,
+		Live_check_duration: time.Duration(5 * time.Second),
+		Conn_closed_callback: func(err error) {
+			fmt.Println("Conn_closed_callback:", err)
+		},
+	}).Run().StartLivenessCheck()
 
 	call_result, call_err := client.Call("hello", []byte("call hello from server"))
 	fmt.Println("hello call_err", call_err)
