@@ -17,12 +17,13 @@ func bindBuildConn(connection io.ReadWriteCloser) *byte_rpc.Client {
 		Version:          example.VERSION,
 		Sub_version:      example.SUB_VERSION,
 		Body_max_bytes:   example.BODY_MAX_BYTES,
-		Method_max_bytes: example.METHOD_MAX_BYTES}).
-		Register("build_conn", func(input []byte) []byte {
-			fmt.Println("build_conn:", string(input))
-			go buildConn()
-			return []byte("build_conn approved")
-		})
+		Method_max_bytes: example.METHOD_MAX_BYTES})
+
+	client.Register("build_conn", func(input []byte) []byte {
+		fmt.Println("build_conn:", string(input))
+		go buildConn()
+		return []byte("build_conn approved")
+	})
 
 	time.AfterFunc(15*time.Second, func() {
 		fmt.Println("15 seconds passed and conn to be closed")

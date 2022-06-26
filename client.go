@@ -149,9 +149,12 @@ func (c *Client) StartLivenessCheck() *Client {
 
 }
 
-func (c *Client) Register(method string, handler Handler) *Client {
+func (c *Client) Register(method string, handler Handler) error {
+	if _, ok := c.handlers.Load(method); ok {
+		return errors.New("method conflict:" + method)
+	}
 	c.handlers.Store(method, handler)
-	return c
+	return nil
 }
 
 func (c *Client) Call(method string, param []byte) (*[]byte, uint16) {
