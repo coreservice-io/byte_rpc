@@ -39,15 +39,14 @@ func main() {
 func bindClient(connection io.ReadWriteCloser) *byte_rpc.Client {
 	client := byte_rpc.NewClient(connection,
 		&byte_rpc.Config{
-			Version:             example.VERSION,
-			Sub_version:         example.SUB_VERSION,
-			Body_max_bytes:      example.BODY_MAX_BYTES,
-			Method_max_bytes:    example.METHOD_MAX_BYTES,
-			Live_check_duration: time.Duration(5 * time.Second),
-			Conn_closed_callback: func(err error) {
-				fmt.Println("Conn_closed_callback:", err)
+			Version:          example.VERSION,
+			Sub_version:      example.SUB_VERSION,
+			Body_max_bytes:   example.BODY_MAX_BYTES,
+			Method_max_bytes: example.METHOD_MAX_BYTES,
+			Conn_closed_callback: func() {
+				fmt.Println("Conn_closed")
 			},
-		}).StartLivenessCheck()
+		})
 
 	client.Register("hello", func(input []byte) []byte {
 		fmt.Println("call to client hello param:", string(input))

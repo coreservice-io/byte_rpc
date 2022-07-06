@@ -52,8 +52,6 @@ func GetErrMsgStr(err_code uint) string {
 	return err_msg_map[err_code]
 }
 
-const LIVE_FAIL_THRESHOLD = 4 // LIVE_FAIL_THRESHOLD * (ping/pong interval) no response
-
 type Handler func([]byte) []byte
 
 type callback struct {
@@ -75,8 +73,7 @@ type Client struct {
 	body_max_bytes       uint32
 	method_max_bytes     uint8
 	last_live_unixtime   int64 //last live check time
-	conn_closed_callback func(error)
-	live_check_duration  time.Duration
+	conn_closed_callback func()
 }
 
 type Config struct {
@@ -84,8 +81,7 @@ type Config struct {
 	Sub_version          uint16
 	Body_max_bytes       uint32
 	Method_max_bytes     uint8
-	Live_check_duration  time.Duration
-	Conn_closed_callback func(error)
+	Conn_closed_callback func()
 }
 
 //live_check_duration is used for a background ping/pong routine
@@ -102,51 +98,9 @@ func NewClient(connection io.ReadWriteCloser, config *Config) *Client {
 		method_max_bytes:     config.Method_max_bytes,
 		last_live_unixtime:   0,
 		conn_closed_callback: config.Conn_closed_callback,
-		live_check_duration:  config.Live_check_duration,
 	}
 
-	//config the ping/pong routing
-	client.Register("ping", func(b []byte) []byte {
-		return []byte("pong")
-	})
-
 	return client
-}
-
-func (c *Client) StartLivenessCheck() *Client {
-
-	c.last_live_unixtime = time.Now().Unix()
-
-	go func() {
-		for {
-			time.Sleep(c.live_check_duration)
-			if time.Now().Unix()-c.last_live_unixtime > LIVE_FAIL_THRESHOLD*int64(c.live_check_duration.Seconds()) {
-				c.Close()
-				c.conn_closed_callback(errors.New("ping time out"))
-				break
-			}
-		}
-	}()
-
-	//start the ping routing
-	go func() {
-		for {
-			//some msg from the other end arrived during last sleep
-			if c.last_live_unixtime < time.Now().Unix()-int64(c.live_check_duration.Seconds()) {
-				_, call_err := c.Call("ping", nil)
-				if call_err != 0 {
-					c.Close()
-					c.conn_closed_callback(errors.New("ping failure"))
-					break
-				}
-				c.last_live_unixtime = time.Now().Unix()
-			}
-			time.Sleep(c.live_check_duration + 1)
-		}
-	}()
-
-	return c
-
 }
 
 func (c *Client) Register(method string, handler Handler) error {
@@ -371,7 +325,9 @@ func (c *Client) Close() {
 	}
 	c.callbacks_mutex.Unlock()
 	c.send_mutex.Unlock()
-	c.conn_closed_callback(nil)
+	if c.conn_closed_callback != nil {
+		c.conn_closed_callback()
+	}
 }
 
 func (c *Client) read_sequence() (uint64, error) {

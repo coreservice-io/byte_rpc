@@ -42,15 +42,14 @@ func buildConn() {
 	}
 
 	client := byte_rpc.NewClient(conn, &byte_rpc.Config{
-		Version:             example.VERSION,
-		Sub_version:         example.SUB_VERSION,
-		Body_max_bytes:      example.BODY_MAX_BYTES,
-		Method_max_bytes:    example.METHOD_MAX_BYTES,
-		Live_check_duration: time.Duration(5 * time.Second),
-		Conn_closed_callback: func(err error) {
-			fmt.Println("Conn_closed_callback:", err)
+		Version:          example.VERSION,
+		Sub_version:      example.SUB_VERSION,
+		Body_max_bytes:   example.BODY_MAX_BYTES,
+		Method_max_bytes: example.METHOD_MAX_BYTES,
+		Conn_closed_callback: func() {
+			fmt.Println("Conn_closed")
 		},
-	}).Run().StartLivenessCheck()
+	}).Run() //.StartLivenessCheck()
 
 	call_result, call_err := client.Call("hello", []byte("call hello from server"))
 	fmt.Println("hello call_err", call_err)
@@ -76,9 +75,6 @@ func main() {
 			fmt.Println("Error accepting", err.Error())
 			continue
 		}
-
-		///// cache ip hit, for the server callback that i am tring to build connection with
-		//go bindServerConn(conn).Run()
 
 		/////for the client who is tring to build a connection to me
 		bindBuildConn(conn).Run()
