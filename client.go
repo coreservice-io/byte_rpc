@@ -307,27 +307,34 @@ func (c *Client) run_() {
 }
 
 func (c *Client) Close() {
-	c.send_mutex.Lock()
-	c.callbacks_mutex.Lock()
-	if !c.conn_closed {
 
-		c.callbacks.Range(func(k, v interface{}) bool {
-			if v.(*callback).msg_error_code == MSG_ERROR_CODE_NO_ERR {
-				v.(*callback).msg_error_code = MSG_ERROR_CODE_CONN_CLOSE
-				c.callbacks.Store(k.(uint64), v.(*callback))
-			}
-			v.(*callback).done <- struct{}{}
-			return true
-		})
+	to_call_close_back := false
 
-		c.conn.Close()
-		c.conn_closed = true
-	}
-	c.callbacks_mutex.Unlock()
-	c.send_mutex.Unlock()
-	if c.conn_closed_callback != nil {
+	func() {
+		c.send_mutex.Lock()
+		c.callbacks_mutex.Lock()
+		defer c.callbacks_mutex.Unlock()
+		defer c.send_mutex.Unlock()
+
+		if !c.conn_closed {
+			c.callbacks.Range(func(k, v interface{}) bool {
+				if v.(*callback).msg_error_code == MSG_ERROR_CODE_NO_ERR {
+					v.(*callback).msg_error_code = MSG_ERROR_CODE_CONN_CLOSE
+					c.callbacks.Store(k.(uint64), v.(*callback))
+				}
+				v.(*callback).done <- struct{}{}
+				return true
+			})
+			c.conn.Close()
+			c.conn_closed = true
+			to_call_close_back = true
+		}
+	}()
+
+	if to_call_close_back && c.conn_closed_callback != nil {
 		c.conn_closed_callback()
 	}
+
 }
 
 func (c *Client) read_sequence() (uint64, error) {
